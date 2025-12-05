@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FastText 实时语种检测器</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 使用 Inter 字体 */
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center p-4">
+
+    <!-- 主容器 -->
+    <div class="w-full max-w-3xl bg-white shadow-2xl shadow-indigo-200/50 rounded-2xl p-6 sm:p-10 space-y-6">
+        <h1 class="text-4xl font-extrabold text-center text-indigo-700">
+            🌍 实时语种检测器
+        </h1>
+        <p class="text-center text-gray-500 text-sm">
+            使用 FastText 模型进行即时语言识别。请在下方选择模型并输入文本。
+        </p>
+
+        <!-- 模型选择和输入区 -->
+        <div class="space-y-4 p-4 border border-gray-200 rounded-xl bg-gray-50">
+            <!-- 模型选择 -->
+            <label for="modelSelect" class="block text-sm font-medium text-gray-700">选择检测模型：</label>
+            <select id="modelSelect" class="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500 transition duration-150">
+                <option value="lid.176.bin">官方 176 语种模型 (.bin)</option>
+                <option value="lid.176.ftz">官方 176 语种模型 (压缩 .ftz)</option>
+            </select>
+
+            <!-- 文本输入区 -->
+            <label for="textInput" class="block text-sm font-medium text-gray-700 pt-2">输入待检测文本：</label>
+            <textarea id="textInput"
+                      rows="4"
+                      class="w-full p-4 border-2 border-indigo-300 rounded-lg shadow-inner focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 resize-none text-base"
+                      placeholder="请输入待检测的文本..."></textarea>
+        </div>
+
+        <!-- 结果显示区 -->
+        <div id="resultBox" class="p-6 bg-indigo-50 border border-indigo-300 rounded-xl min-h-[140px] flex flex-col justify-center transition-all duration-300">
+            <h2 class="text-xl font-bold text-indigo-800 mb-2 border-b border-indigo-300 pb-2">🎯 检测结果</h2>
+            <div id="predictionContent">
+                <p class="text-gray-600 text-lg italic">等待输入...</p>
+            </div>
+            <div id="loadingIndicator" class="hidden text-center py-4">
+                <div class="animate-spin inline-block w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full"></div>
+                <span class="ml-3 text-indigo-500 font-medium">正在使用所选模型进行检测...</span>
+            </div>
+        </div>
+
+        <!-- 错误提示区 -->
+        <div id="errorBox" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative" role="alert">
+            <strong class="font-bold">⚠️ 错误:</strong>
+            <span id="errorMessage" class="block sm:inline ml-2"></span>
+        </div>
+    </div>
+
+    <script>
+        // 映射用户提供的语言代码到中文名称
+        const LANGUAGE_MAP = {
+            'af': '南非语', 'als': '阿尔萨斯语', 'am': '阿姆哈拉语', 'an': '阿拉贡语',
+            'ar': '阿拉伯语', 'arz': '埃及阿拉伯语', 'as': '阿萨姆语', 'ast': '阿斯图里亚斯语',
+            'av': '阿瓦尔语', 'az': '阿塞拜疆语', 'azb': '南阿塞拜疆语', 'ba': '巴什基尔语',
+            'bar': '巴伐利亚语', 'bcl': '中部比科尔语', 'be': '白俄罗斯语', 'bg': '保加利亚语',
+            'bh': '比哈尔语', 'bn': '孟加拉语', 'bo': '藏语', 'bpy': '比什奴普里亚-曼尼普尔语',
+            'br': '布列塔尼语', 'bs': '波斯尼亚语', 'bxr': '布里亚特语', 'ca': '加泰罗尼亚语',
+            'cbk': '查瓦卡诺语', 'ce': '车臣语', 'ceb': '宿雾语', 'ckb': '中库尔德语',
+            'co': '科西嘉语', 'cs': '捷克语', 'cv': '楚瓦什语', 'cy': '威尔士语',
+            'da': '丹麦语', 'de': '德语', 'diq': '扎扎其语', 'dsb': '低地索布语',
+            'dty': '迪奥利语', 'dv': '马尔代夫语', 'el': '希腊语', 'eml': '艾米利亚语',
+            'en': '英语', 'eo': '世界语', 'es': '西班牙语', 'et': '爱沙尼亚语',
+            'eu': '巴斯克语', 'fa': '波斯语', 'fi': '芬兰语', 'fr': '法语',
+            'frr': '北弗里斯兰语', 'fy': '西弗里斯语', 'ga': '爱尔兰语', 'gd': '苏格兰盖尔语',
+            'gl': '加利西亚语', 'gn': '瓜拉尼语', 'gom': '果阿孔卡尼语', 'gu': '古吉拉特语',
+            'gv': '马恩岛语', 'he': '希伯来语', 'hi': '印地语', 'hif': '斐济印地语',
+            'hr': '克罗地亚语', 'hsb': '高地索布语', 'ht': '海地克里奥尔语', 'hu': '匈牙利语',
+            'hy': '亚美尼亚语', 'ia': '国际语', 'id': '印尼语', 'ie': '国际语',
+            'ilo': '伊洛卡诺语', 'io': '伊多语', 'is': '冰岛语', 'it': '意大利语',
+            'ja': '日语', 'jbo': '逻辑语', 'jv': '爪哇语', 'ka': '格鲁吉亚语',
+            'kk': '哈萨克语', 'km': '高棉语', 'kn': '卡纳达语', 'ko': '韩语',
+            'krc': '卡拉恰伊-巴尔卡尔语', 'ku': '库尔德语', 'kv': '科米语', 'kw': '康沃尔语',
+            'ky': '吉尔吉斯语', 'la': '拉丁语', 'lb': '卢森堡语', 'lez': '列兹金语',
+            'li': '林堡语', 'lmo': '伦巴底语', 'lo': '老挝语', 'lrc': '北洛雷斯坦语',
+            'lt': '立陶宛语', 'lv': '拉脱维亚语', 'mai': '迈蒂利语', 'mg': '马拉加斯语',
+            'mhr': '马里语', 'min': '米南卡堡语', 'mk': '马其顿语', 'ml': '马拉雅拉姆语',
+            'mn': '蒙古语', 'mr': '马拉地语', 'mrj': '西马里语', 'ms': '马来语',
+            'mt': '马耳他语', 'mwl': '米兰德语', 'my': '缅甸语', 'myv': '莫尔多瓦语',
+            'mzn': '马赞德兰语', 'nah': '纳瓦特尔语', 'nap': '那不勒斯语', 'nds': '低地德语',
+            'ne': '尼泊尔语', 'new': '尼瓦尔语', 'nl': '荷兰语', 'nn': '新挪威语',
+            'no': '挪威语', 'oc': '奥克语', 'or': '奥里亚语', 'os': '奥塞梯语',
+            'pa': '旁遮普语', 'pam': '邦板牙语', 'pfl': '普法尔茨德语', 'pl': '波兰语',
+            'pms': '皮埃蒙特语', 'pnb': '西旁遮普语', 'ps': '普什图语', 'pt': '葡萄牙语',
+            'qu': '克丘亚语', 'rm': '罗曼什语', 'ro': '罗马尼亚语', 'ru': '俄语',
+            'rue': '卢森尼亚语', 'sa': '梵语', 'sah': '雅库特语', 'sc': '撒丁语',
+            'scn': '西西里语', 'sco': '苏格兰语', 'sd': '信德语', 'sh': '塞尔维亚-克罗地亚语',
+            'si': '僧伽罗语', 'sk': '斯洛伐克语', 'sl': '斯洛文尼亚语', 'so': '索马里语',
+            'sq': '阿尔巴尼亚语', 'sr': '塞尔维亚语', 'su': '巽他语', 'sv': '瑞典语',
+            'sw': '斯瓦希里语', 'ta': '泰米尔语', 'te': '泰卢固语', 'tg': '塔吉克语',
+            'th': '泰语', 'tk': '土库曼语', 'tl': '他加禄语', 'tr': '土耳其语',
+            'tt': '鞑靼语', 'tyv': '图瓦语', 'ug': '维吾尔语', 'uk': '乌克兰语',
+            'ur': '乌尔都语', 'uz': '乌兹别克语', 'vec': '威尼斯语', 'vep': '维普斯语',
+            'vi': '越南语', 'vls': '西弗拉芒语', 'vo': '沃拉普克语', 'wa': '瓦隆语',
+            'war': '瓦瑞语', 'wuu': '吴语', 'xal': '卡尔梅克语', 'xmf': '明格雷尔语',
+            'yi': '意第绪语', 'yo': '约鲁巴语', 'yue': '粤语', 'zh': '中文 (汉语)'
+        };
+
+        const API_URL = '/predict'; // Flask 接口
+        const textInput = document.getElementById('textInput');
+        const modelSelect = document.getElementById('modelSelect'); // 新增模型选择器元素
+        const predictionContent = document.getElementById('predictionContent');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const errorBox = document.getElementById('errorBox');
+        const errorMessage = document.getElementById('errorMessage');
+        let debounceTimer;
+
+        /**
+         * 显示错误信息
+         * @param {string} message 错误内容
+         */
+        function showError(message) {
+            errorBox.classList.remove('hidden');
+            errorMessage.textContent = message;
+        }
+
+        /**
+         * 隐藏错误信息
+         */
+        function hideError() {
+            errorBox.classList.add('hidden');
+        }
+
+        /**
+         * 获取语言的中文名称
+         * @param {string} code 语言代码 (如 'en')
+         * @returns {string} 中文名称或代码本身
+         */
+        function getChineseName(code) {
+            return LANGUAGE_MAP[code] || `未知语言 (${code})`;
+        }
+
+        /**
+         * 执行语种检测请求
+         * @param {string} text 待检测文本
+         * @param {string} modelName 选定的模型名称
+         */
+        async function detectLanguage(text, modelName) {
+            hideError();
+            loadingIndicator.classList.remove('hidden');
+            predictionContent.innerHTML = ''; // 清空之前的内容
+
+            if (text.trim().length === 0) {
+                loadingIndicator.classList.add('hidden');
+                predictionContent.innerHTML = '<p class="text-gray-600 text-lg italic">等待输入...</p>';
+                return;
+            }
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        text: text,
+                        model_name: modelName // 发送选定的模型名称到后端
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    const langName = getChineseName(data.lang_code);
+                    predictionContent.innerHTML = `
+                        <div class="flex items-center space-x-3">
+                            <span class="text-4xl font-extrabold text-indigo-700">${langName}</span>
+                            <span class="text-xl text-gray-500 bg-gray-200 px-2 py-1 rounded-md">(${data.lang_code})</span>
+                        </div>
+                        <span class="block text-base text-gray-700 mt-2">
+                            置信度:
+                            <span class="font-mono font-semibold text-green-600">${data.confidence}</span>
+                        </span>
+                        <span class="block text-xs text-gray-400 mt-1">使用模型: ${modelName}</span>
+                    `;
+                } else {
+                    // 处理后端返回的错误信息
+                    showError(data.error || `检测失败，状态码: ${response.status}`);
+                    predictionContent.innerHTML = '<p class="text-gray-600 text-lg italic">检测失败。</p>';
+                }
+
+            } catch (e) {
+                // 处理网络或解析错误
+                showError(`网络连接错误或服务器无响应: ${e.message}`);
+                predictionContent.innerHTML = '<p class="text-gray-600 text-lg italic">检测失败。</p>';
+            } finally {
+                loadingIndicator.classList.add('hidden');
+            }
+        }
+
+        // --- 事件处理器 ---
+        function handleInput() {
+            const text = textInput.value;
+            const modelName = modelSelect.value;
+
+            // 清除之前的定时器
+            clearTimeout(debounceTimer);
+
+            // 设置新的定时器：500毫秒后执行检测
+            debounceTimer = setTimeout(() => {
+                detectLanguage(text, modelName);
+            }, 500);
+        }
+
+        // --- 事件监听器：文本输入和模型选择更改都会触发检测 ---
+        textInput.addEventListener('input', handleInput);
+        modelSelect.addEventListener('change', handleInput);
+
+        // 初始状态设置
+        window.onload = () => {
+             predictionContent.innerHTML = '<p class="text-gray-600 text-lg italic">请输入文本以开始检测...</p>';
+             // 立即执行一次检测，以显示初始状态
+             handleInput();
+        };
+
+    </script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+flask-cors
+fasttext-wheel
+scikit-learn
+pandas
+flask
